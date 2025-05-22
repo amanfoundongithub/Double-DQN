@@ -8,32 +8,44 @@ class ReplayBuffer:
     Stores fixed-size tuples of (obs, action, reward, next_obs, done).
     """
 
-    def __init__(self, obs_dim: int, capacity: int, batch_size: int = 32):
+    def __init__(self, 
+                 obs_dim, 
+                 capacity, 
+                 batch_size = 32):
+        
+        # Define the constants 
+        
+        # Capacity 
         self.capacity = capacity
+        
+        # Batch Size 
         self.batch_size = batch_size
+        
+        # Size of the buffer currently 
         self.size = 0
+        
+        # Pointer to the buffer 
         self.ptr = 0
 
         # Make buffers for the (state, action, next_state, reward, done) 
-        self.state_buffer = np.zeros((capacity, obs_dim), dtype=np.float32)
+        self.state_buffer      = np.zeros((capacity, obs_dim), dtype=np.float32)
         self.next_state_buffer = np.zeros((capacity, obs_dim), dtype=np.float32)
-        self.action_buffer = np.zeros((capacity,), dtype=np.float32)
-        self.reward_buffer = np.zeros((capacity,), dtype=np.float32)
-        self.done_buffer = np.zeros((capacity,), dtype=np.float32)
+        self.action_buffer     = np.zeros((capacity,), dtype=np.float32)
+        self.reward_buffer     = np.zeros((capacity,), dtype=np.float32)
+        self.done_buffer       = np.zeros((capacity,), dtype=np.float32)
 
-    def store(self, 
-              state: np.ndarray, 
-              action: float, 
-              reward: float, 
-              next_state: np.ndarray, 
-              done: bool):
+    # New tuple : (state, action, reward, next_state) => SARS 
+    def store(self, state, action, reward, next_state, done):
         self.state_buffer[self.ptr] = state  
         self.action_buffer[self.ptr] = action 
         self.reward_buffer[self.ptr] = reward 
         self.next_state_buffer[self.ptr] = next_state 
-        self.done_buffer[self.ptr] = float(done)
+        self.done_buffer[self.ptr] = 1 if done else 0 
 
+        # Round -> deque 
         self.ptr = (self.ptr + 1) % self.capacity
+        
+        # Size of the buffer updated 
         self.size = min(self.size + 1, self.capacity)
 
     def sample_batch(self):
