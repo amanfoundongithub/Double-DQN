@@ -8,83 +8,67 @@ import numpy as np
 import matplotlib.pyplot as plt 
 
 from ReplayBuffer import ReplayBuffer
+from Network      import Network
 
 
 # Jupyter Notebook 
 # from IPython.display import clear_output
 
 
-class Network(nn.Module):
-    def __init__(self, 
-                 in_dim: int, 
-                 out_dim: int):
-        super().__init__()
-
-        self.layers = nn.Sequential(
-            nn.Linear(in_dim, 128), 
-            nn.ReLU(),
-            nn.Linear(128, 128), 
-            nn.ReLU(), 
-            nn.Linear(128, out_dim)
-        )
-
-    def forward(self, x):
-        return self.layers(x)
-    
-
 class DQNAgent:
     def __init__(
-        self, 
-        env: gym.Env,
-        memory_size: int,
-        batch_size: int,
-        target_update: int,
-        epsilon_decay: float,
-        max_epsilon: float = 1.0,
-        min_epsilon: float = 0.1,
-        gamma: float = 0.99,
+        self, env,
+        memory_size, batch_size, target_update,
+        epsilon_decay, max_epsilon = 1.0, min_epsilon = 0.1, gamma = 0.99,
     ):
-        obs_dim = env.observation_space.shape[0]
+        
+        # Environment and its parameters 
+        self.env   = env
+        obs_dim    = env.observation_space.shape[0]
         action_dim = env.action_space.n
         
-        self.env = env
+        
+        # Initialize memory and params 
         self.memory = ReplayBuffer(obs_dim, memory_size, batch_size)
         self.batch_size = batch_size
+        
+        # Epsilon decay -> linear 
         self.epsilon = max_epsilon
         self.epsilon_decay = epsilon_decay
         self.max_epsilon = max_epsilon
         self.min_epsilon = min_epsilon
+        
+        
+        # Update parameters 
         self.target_update = target_update
         self.gamma = gamma
         
-        # device: cpu / gpu
-        self.device = torch.device(
-            "cuda" if torch.cuda.is_available() else "cpu"
-        )
+        # device
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
 
-        # networks: dqn, dqn_target
+        # networks: primal and target 
         self.dqn = Network(obs_dim, action_dim).to(self.device)
         self.dqn_target = Network(obs_dim, action_dim).to(self.device)
+        
+        # Load target and primal to be same 
         self.dqn_target.load_state_dict(self.dqn.state_dict())
         self.dqn_target.eval()
         
-        # optimizer
+        # optimizer for training 
         self.optimizer = optim.Adam(self.dqn.parameters())
 
         # transition to store in memory
         self.transition = list()
         
-        # mode: train / test
+        # train/test 
         self.is_test = False
 
     def select_action(self, state):
-        # epsilon greedy policy
-        if self.epsilon > np.random.random():
+        if np.random.random() < self.epsilon:
             selected_action = self.env.action_space.sample()
         else:
-            selected_action = self.dqn(
-                torch.FloatTensor(state).to(self.device)
-            ).argmax()
+            state = torch.FloatTensor(state).to(self.device)
+            selected_action = self.dqn(state).argmax()
             selected_action = selected_action.detach().cpu().numpy()
         
         if not self.is_test:
@@ -102,18 +86,42 @@ class DQNAgent:
     
         return next_state, reward, done
 
-    def update_model(self):
-
+    def __update_model(self):
         samples = self.memory.sample_batch()
-        loss = self._compute_dqn_loss(samples)
+        
+        # Get the SARS from the data
+        state = torch.FloatTensor(samples["obs"]).to(self.device)
+        next_state = torch.FloatTensor(samples["next_obs"]).to(self.device)
+        action = torch.LongTensor(samples["acts"].reshape(-1, 1)).to(self.device)
+        reward = torch.FloatTensor(samples["rews"].reshape(-1, 1)).to(self.device)
+        done = torch.FloatTensor(samples["done"].reshape(-1, 1)).to(self.device)
+        
+        # G_t   = r + gamma * v(s_{t+1})  if state != Terminal
+        curr_q_value = self.dqn(state).gather(1, action)
+        #       = r                       otherwise
+        next_q_value = self.dqn_target(next_state).gather(1, 
+                                                          self.dqn(next_state).argmax(dim=1, keepdim=True)
+                                                          ).detach()
+        
+        target = reward if done == True else (reward + self.gamma * next_q_value)
+        target = target.to(self.device)
 
+        # L1 Huber Loss 
+        loss = F.smooth_l1_loss(curr_q_value, target)
+
+        # Training Now 
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
 
+        # Return loss 
         return loss.item()
         
-    def train(self, num_frames, plotting_interval = 200):
+    def train(self, 
+              num_frames, 
+              plotting_interval = 200):
+        
+        # Training mode 
         self.is_test = False
         
         state, _ = self.env.reset()
@@ -135,37 +143,38 @@ class DQNAgent:
                 state, _ = self.env.reset()
                 scores.append(score)
                 score = 0
-
-            # if training is ready
+                
+            
+            # Buffer is full 
             if len(self.memory) >= self.batch_size:
-                loss = self.update_model()
+                loss = self.__update_model()
                 losses.append(loss)
                 update_cnt += 1
                 
                 # linearly decrease epsilon
-                self.epsilon = max(
-                    self.min_epsilon, self.epsilon - (
-                        self.max_epsilon - self.min_epsilon
-                    ) * self.epsilon_decay
-                )
+                self.epsilon = max(self.min_epsilon, 
+                                   self.epsilon - (self.max_epsilon - self.min_epsilon) * self.epsilon_decay)
                 epsilons.append(self.epsilon)
                 
                 # if hard update is needed
                 if update_cnt % self.target_update == 0:
-                    self._target_hard_update()
+                    self.dqn_target.load_state_dict(self.dqn.state_dict())
 
-            # plotting
+            # Olots after 200 steps 
             if frame_idx % plotting_interval == 0:
                 self._plot(frame_idx, scores, losses, epsilons)
                 
         self.env.close()
                 
-    def test(self, video_folder) -> None:
+    def test(self, 
+             video_folder):
+        
+        # Test Mode 
         self.is_test = True
         
         # for recording a video
-        naive_env = self.env
-        self.env = gym.wrappers.RecordVideo(self.env, video_folder=video_folder)
+        env = self.env
+        self.env = gym.wrappers.RecordVideo(self.env, video_folder = video_folder)
         
         state, _ = self.env.reset()
         done = False
@@ -174,40 +183,14 @@ class DQNAgent:
         while not done:
             action = self.select_action(state)
             next_state, reward, done = self.step(action)
-
             state = next_state
             score += reward
         
-        print("score: ", score)
+        print("Final Score: ", score)
         self.env.close()
         
         # reset
-        self.env = naive_env
-
-    def _compute_dqn_loss(self, samples):
-        device = self.device  # for shortening the following lines
-        state = torch.FloatTensor(samples["obs"]).to(device)
-        next_state = torch.FloatTensor(samples["next_obs"]).to(device)
-        action = torch.LongTensor(samples["acts"].reshape(-1, 1)).to(device)
-        reward = torch.FloatTensor(samples["rews"].reshape(-1, 1)).to(device)
-        done = torch.FloatTensor(samples["done"].reshape(-1, 1)).to(device)
-        
-        # G_t   = r + gamma * v(s_{t+1})  if state != Terminal
-        #       = r                       otherwise
-        curr_q_value = self.dqn(state).gather(1, action)
-        next_q_value = self.dqn_target(next_state).gather(  # Double DQN
-            1, self.dqn(next_state).argmax(dim=1, keepdim=True)
-        ).detach()
-        mask = 1 - done
-        target = (reward + self.gamma * next_q_value * mask).to(self.device)
-
-        # calculate dqn loss
-        loss = F.smooth_l1_loss(curr_q_value, target)
-
-        return loss
-    
-    def _target_hard_update(self):
-        self.dqn_target.load_state_dict(self.dqn.state_dict())
+        self.env = env 
                 
     def _plot(
         self, 
