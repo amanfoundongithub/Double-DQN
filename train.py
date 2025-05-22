@@ -2,7 +2,9 @@ from DoubleDQN import DQNAgent
 import gymnasium as gym 
 
 # environment
-env = gym.make("LunarLander-v2", max_episode_steps=200, render_mode="rgb_array")
+env = gym.make("LunarLander-v2", 
+               max_episode_steps = 500, 
+               render_mode="rgb_array")
 
 # parameters
 num_frames = 100000
