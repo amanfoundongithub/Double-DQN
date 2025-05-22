@@ -12,7 +12,7 @@ from Network      import Network
 
 
 # Jupyter Notebook 
-# from IPython.display import clear_output
+from IPython.display import clear_output
 
 
 class DQNAgent:
@@ -200,15 +200,24 @@ class DQNAgent:
         epsilons,
     ):
         """Plot the training progresses."""
-        # clear_output(True) => Jupyter notebook uncomment this line 
-        plt.figure(figsize=(20, 5))
-        plt.subplot(131)
-        plt.title('frame %s. score: %s' % (frame_idx, np.mean(scores[-10:])))
+        clear_output(True)
+        plt.figure(figsize=(15, 12))  # Bigger overall figure size
+
+        plt.subplot(311)  # 3 rows, 1 column, 1st plot
+        plt.title(f'Frame {frame_idx}. Score: {np.mean(scores[-10:]):.2f}', fontsize=14)
         plt.plot(scores)
-        plt.subplot(132)
-        plt.title('loss')
+        plt.ylabel("Score", fontsize=12)
+
+        plt.subplot(312)  # 3 rows, 1 column, 2nd plot
+        plt.title('Loss', fontsize=14)
         plt.plot(losses)
-        plt.subplot(133)
-        plt.title('epsilons')
+        plt.ylabel("Loss", fontsize=12)
+
+        plt.subplot(313)  # 3 rows, 1 column, 3rd plot
+        plt.title('Epsilon', fontsize=14)
         plt.plot(epsilons)
+        plt.xlabel("Updates", fontsize=12)
+        plt.ylabel("Epsilon", fontsize=12)
+
+        plt.tight_layout()
         plt.show()
